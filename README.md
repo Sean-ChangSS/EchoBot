@@ -141,7 +141,7 @@ Live2D 默认开启眼神鼠标跟随的功能，可在面板中关闭。
   <img src="./assets/webui_image.png" width="100%">
 </p>
 
-> 展示所用的 Live2D 模型来自：[超精致Live2D量贩模型】兔兔这么可爱，当然要一口吃掉你！](https://www.bilibili.com/video/BV1YG6zYzEnN)
+> 展示所用的 Live2D 模型来自：[【超精致Live2D量贩模型】兔兔这么可爱，当然要一口吃掉你！](https://www.bilibili.com/video/BV1YG6zYzEnN)
 
 ### ⏰ 定时与周期任务管理
 
