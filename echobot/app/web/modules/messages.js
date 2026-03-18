@@ -4,6 +4,10 @@ import {
     TEXT_CONTENT_BLOCK_TYPE,
     normalizeMessageContent,
 } from "./content.js";
+import {
+    clearMathTypesetting,
+    scheduleMathTypesetting,
+} from "./math.js";
 import { buildMarkdownFragment } from "./markdown.js";
 
 let pendingScrollFrameId = 0;
@@ -27,6 +31,7 @@ export function addMessage(kind, content, label, options = {}) {
     container.appendChild(body);
     syncMessageMeta(container, label, options);
     DOM.messages.appendChild(container);
+    scheduleMathTypesetting(body);
     scheduleMessagesScrollToBottom();
     return messageId;
 }
@@ -47,11 +52,13 @@ export function updateMessage(messageId, content, label, options = {}) {
     syncMessageMeta(container, label, options);
     if (body) {
         renderMessageBody(body, kind, content, options);
+        scheduleMathTypesetting(body);
     }
     scheduleMessagesScrollToBottom();
 }
 
 export function clearMessages() {
+    clearMathTypesetting(DOM.messages);
     DOM.messages.innerHTML = "";
     UI_STATE.messageCounter = 0;
 }
@@ -72,6 +79,7 @@ export function removeMessage(messageId) {
     if (!container) {
         return;
     }
+    clearMathTypesetting(container);
     container.remove();
 }
 
@@ -142,6 +150,7 @@ function resolveMessageAriaLabel(kind, label) {
 }
 
 function renderMessageBody(element, kind, content, options = {}) {
+    clearMathTypesetting(element);
     const normalizedContent = normalizeMessageContent(content);
     if (Array.isArray(normalizedContent)) {
         renderStructuredBody(element, kind, normalizedContent, options);

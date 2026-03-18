@@ -1671,6 +1671,112 @@ button {
     text-underline-offset: 0.12em;
 }
 
+.message-text-markdown del {
+    opacity: 0.72;
+    text-decoration-thickness: 1.5px;
+}
+
+.message-text-markdown .message-list-item-content {
+    min-width: 0;
+}
+
+.message-text-markdown .message-task-item {
+    list-style: none;
+}
+
+.message-text-markdown .message-task-item > .message-list-item-content {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+}
+
+.message-text-markdown .message-task-checkbox {
+    margin: 0.26rem 0 0;
+    accent-color: var(--accent-strong);
+}
+
+.message-text-markdown .message-task-text {
+    min-width: 0;
+}
+
+.message-text-markdown .message-task-text.is-checked {
+    opacity: 0.72;
+    text-decoration: line-through;
+}
+
+.message-text-markdown .message-markdown-table-wrap {
+    overflow-x: auto;
+    margin: 0 0 0.9em;
+    border: 1px solid rgba(87, 57, 34, 0.12);
+    border-radius: 16px;
+    background: rgba(255, 251, 246, 0.8);
+}
+
+.message-text-markdown .message-markdown-table {
+    width: 100%;
+    min-width: 360px;
+    border-collapse: collapse;
+    font-size: 0.96rem;
+}
+
+.message-text-markdown .message-markdown-table th,
+.message-text-markdown .message-markdown-table td {
+    padding: 0.62em 0.78em;
+    border-bottom: 1px solid rgba(87, 57, 34, 0.1);
+    vertical-align: top;
+}
+
+.message-text-markdown .message-markdown-table th {
+    background: rgba(45, 34, 25, 0.06);
+    font-weight: 700;
+}
+
+.message-text-markdown .message-markdown-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.message-text-markdown .message-markdown-table .is-align-center {
+    text-align: center;
+}
+
+.message-text-markdown .message-markdown-table .is-align-right {
+    text-align: right;
+}
+
+.message-text-markdown .message-math-inline {
+    display: inline-block;
+    max-width: 100%;
+    padding: 0 0.12em;
+    vertical-align: middle;
+    overflow-x: auto;
+}
+
+.message-text-markdown .message-math-block {
+    overflow-x: auto;
+    margin: 0 0 0.9em;
+    padding: 0.8em 1em;
+    border: 1px solid rgba(87, 57, 34, 0.1);
+    border-radius: 16px;
+    background: rgba(45, 34, 25, 0.04);
+}
+
+.message-text-markdown .message-math.is-fallback {
+    font-family: "Cambria Math", "STIX Two Math", "Times New Roman", serif;
+    white-space: pre-wrap;
+}
+
+.message-text-markdown .message-markdown-image-link {
+    display: inline-block;
+    max-width: min(100%, 320px);
+    margin: 0.25em 0;
+    vertical-align: middle;
+}
+
+.message-text-markdown .message-markdown-image {
+    max-width: min(100%, 320px);
+    max-height: 280px;
+}
+
 .message-text-markdown hr {
     border: none;
     border-top: 1px solid rgba(87, 57, 34, 0.14);
