@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from echobot.agent import AgentCore
+from echobot.agent import AgentCore, AgentRunResult
 from echobot import build_default_system_prompt
 from echobot.config import load_env_file
 from echobot.memory import (
@@ -23,6 +23,9 @@ from echobot.providers.openai_compatible import (
     OpenAICompatibleProvider,
     OpenAICompatibleSettings,
 )
+from echobot.runtime.session_runner import SessionAgentRunner
+from echobot.runtime.sessions import SessionStore
+from echobot.runtime.turns import run_agent_turn
 from echobot.tools import BaseTool, ToolRegistry
 
 
@@ -131,6 +134,53 @@ class FakeToolProvider(LLMProvider):
             message=LLMMessage(role="assistant", content="done"),
             model="fake-model",
             finish_reason="stop",
+        )
+
+
+class MaxStepsRecordingAgent(AgentCore):
+    def __init__(self) -> None:
+        super().__init__(FakeProvider())
+        self.max_steps_seen: int | None = None
+
+    async def ask_with_tools(
+        self,
+        user_input: str,
+        *,
+        tool_registry: ToolRegistry,
+        image_urls=None,
+        history=None,
+        compressed_summary: str = "",
+        tool_choice=None,
+        extra_system_messages=None,
+        transient_system_messages=None,
+        temperature=None,
+        max_tokens=None,
+        max_steps: int = 50,
+        trace_callback=None,
+    ) -> AgentRunResult:
+        del (
+            tool_registry,
+            image_urls,
+            history,
+            tool_choice,
+            extra_system_messages,
+            transient_system_messages,
+            temperature,
+            max_tokens,
+            trace_callback,
+        )
+        self.max_steps_seen = max_steps
+        user_message = LLMMessage(role="user", content=user_input)
+        response = LLMResponse(
+            message=LLMMessage(role="assistant", content="ok"),
+            model="fake-model",
+        )
+        return AgentRunResult(
+            response=response,
+            new_messages=[user_message, response.message],
+            history=[user_message, response.message],
+            steps=1,
+            compressed_summary=compressed_summary,
         )
 
 
@@ -257,6 +307,42 @@ class AgentCoreTests(unittest.IsolatedAsyncioTestCase):
             [message.role for message in second_call],
         )
         self.assertEqual("handoff", second_call[0].content)
+
+
+class RunAgentTurnTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_agent_turn_uses_default_max_steps_of_50(self) -> None:
+        agent = MaxStepsRecordingAgent()
+
+        result = await run_agent_turn(
+            agent,
+            "hello",
+            [],
+            compressed_summary="",
+            skill_registry=None,
+            tool_registry=ToolRegistry(),
+            temperature=None,
+            max_tokens=None,
+        )
+
+        self.assertEqual("ok", result.response.message.content)
+        self.assertEqual(50, agent.max_steps_seen)
+
+
+class SessionAgentRunnerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_run_prompt_uses_configured_default_max_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_store = SessionStore(Path(temp_dir) / "sessions")
+            agent = MaxStepsRecordingAgent()
+            runner = SessionAgentRunner(
+                agent,
+                session_store,
+                tool_registry_factory=lambda *_args: ToolRegistry(),
+                default_max_steps=77,
+            )
+
+            await runner.run_prompt("demo", "hello")
+
+            self.assertEqual(77, agent.max_steps_seen)
 
 
 class SystemPromptTests(unittest.TestCase):

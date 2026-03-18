@@ -76,6 +76,7 @@ def build_runtime_context(
     load_env_file(str(env_file_path))
     configure_runtime_logging()
     lightweight_max_tokens = _env_int("ECHOBOT_LIGHTWEIGHT_MAX_TOKENS", 4096)
+    agent_max_steps = _env_int("ECHOBOT_AGENT_MAX_STEPS", 50)
     settings = OpenAICompatibleSettings.from_env()
     decider_provider = _build_provider_from_env(
         prefix="DECIDER_LLM_",
@@ -137,6 +138,7 @@ def build_runtime_context(
         tool_registry_factory=tool_registry_factory,
         default_temperature=options.temperature,
         default_max_tokens=options.max_tokens,
+        default_max_steps=agent_max_steps,
         trace_store=agent_trace_store,
     )
     role_registry = RoleCardRegistry.discover(project_root=workspace)

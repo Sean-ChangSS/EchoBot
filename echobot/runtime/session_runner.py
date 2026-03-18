@@ -35,6 +35,7 @@ class SessionAgentRunner:
         tool_registry_factory: ToolRegistryFactory | None = None,
         default_temperature: float | None = None,
         default_max_tokens: int | None = None,
+        default_max_steps: int = 50,
         trace_store: AgentTraceStore | None = None,
     ) -> None:
         self._agent = agent
@@ -43,6 +44,7 @@ class SessionAgentRunner:
         self._tool_registry_factory = tool_registry_factory
         self._default_temperature = default_temperature
         self._default_max_tokens = default_max_tokens
+        self._default_max_steps = max(int(default_max_steps), 1)
         self._trace_store = trace_store
         self._locks: dict[str, asyncio.Lock] = {}
         self._locks_guard = asyncio.Lock()
@@ -135,6 +137,7 @@ class SessionAgentRunner:
                         if max_tokens is None
                         else max_tokens
                     ),
+                    max_steps=self._default_max_steps,
                     trace_callback=trace_callback,
                 )
                 session.history = list(result.history)

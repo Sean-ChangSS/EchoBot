@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from ..agent import AgentCore, AgentRunResult, TraceCallback
 from ..models import LLMMessage
 from ..skill_support import SkillRegistry
 from ..tools import ToolRegistry
-from collections.abc import Sequence
 
 
 async def run_agent_turn(
@@ -20,6 +21,7 @@ async def run_agent_turn(
     transient_system_messages: Sequence[str] | None = None,
     temperature: float | None,
     max_tokens: int | None,
+    max_steps: int = 50,
     trace_callback: TraceCallback | None = None,
 ) -> AgentRunResult:
     if skill_registry is not None:
@@ -34,6 +36,7 @@ async def run_agent_turn(
             transient_system_messages=transient_system_messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            max_steps=max_steps,
             trace_callback=trace_callback,
         )
 
@@ -48,6 +51,7 @@ async def run_agent_turn(
             transient_system_messages=transient_system_messages,
             temperature=temperature,
             max_tokens=max_tokens,
+            max_steps=max_steps,
             trace_callback=trace_callback,
         )
 

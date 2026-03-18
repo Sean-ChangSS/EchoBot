@@ -39,5 +39,7 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+example_projects/
+
 .echobot
 logs/

@@ -168,7 +168,7 @@ class AgentCore:
         transient_system_messages: Sequence[str] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        max_steps: int = 8,
+        max_steps: int = 50,
         trace_callback: TraceCallback | None = None,
     ) -> AgentRunResult:
         persistent_messages = self._build_persistent_messages(
@@ -250,7 +250,7 @@ class AgentCore:
         transient_system_messages: Sequence[str] | None = None,
         temperature: float | None = None,
         max_tokens: int | None = None,
-        max_steps: int = 30,
+        max_steps: int = 50,
         trace_callback: TraceCallback | None = None,
     ) -> AgentRunResult:
         active_skill_names = skill_registry.active_skill_names_from_history(history)

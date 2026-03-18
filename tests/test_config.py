@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import logging
 import io
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from echobot.config import (
     _configure_loguru_reme_logging,
     configure_runtime_logging,
 )
+from echobot.runtime.bootstrap import RuntimeOptions, build_runtime_context
 
 
 class RuntimeLoggingConfigTests(unittest.TestCase):
@@ -68,3 +73,37 @@ class RuntimeLoggingConfigTests(unittest.TestCase):
         self.assertNotIn("hidden info", output)
         self.assertIn("visible warning", output)
         self.assertIn("other info", output)
+
+
+class RuntimeBootstrapConfigTests(unittest.TestCase):
+    def test_build_runtime_context_reads_agent_max_steps_from_env_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            env_file = workspace / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "LLM_API_KEY=test-key",
+                        "LLM_MODEL=test-model",
+                        "LLM_BASE_URL=https://example.com/v1",
+                        "LLM_TIMEOUT=60",
+                        "ECHOBOT_AGENT_MAX_STEPS=77",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                context = build_runtime_context(
+                    RuntimeOptions(
+                        workspace=workspace,
+                        no_memory=True,
+                        no_tools=True,
+                        no_skills=True,
+                        no_heartbeat=True,
+                    ),
+                    load_session_state=False,
+                )
+
+            self.assertEqual(77, context.session_runner._default_max_steps)
