@@ -41,7 +41,8 @@ _BOT_COMMANDS = [
     BotCommand("rename", "Rename the current session"),
     BotCommand("delete", "Delete the current session"),
     BotCommand("current", "Show current session"),
-    BotCommand("help", "Show session commands"),
+    BotCommand("route", "Show or switch route mode"),
+    BotCommand("help", "Show all commands"),
 ]
 
 

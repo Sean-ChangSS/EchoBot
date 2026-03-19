@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
 
 from ..channels import InboundMessage, MessageBus, OutboundMessage
 from ..channels.types import DeliveryTarget
-from ..orchestration import RoleCommand, execute_role_command, parse_role_command
+from ..commands.bindings import GatewayCommandContext, dispatch_gateway_command
 from ..runtime.scheduled_tasks import (
     build_cron_job_executor as build_shared_cron_job_executor,
     build_heartbeat_executor as build_shared_heartbeat_executor,
@@ -14,17 +13,11 @@ from ..runtime.scheduled_tasks import (
 from ..runtime.bootstrap import RuntimeContext
 from ..runtime.session_service import SessionLifecycleService
 from .delivery import DeliveryStore
-from .route_sessions import RouteSessionStore, RouteSessionSummary
+from .route_sessions import RouteSessionStore
 from .session_service import GatewaySessionService
 
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(slots=True)
-class SessionCommand:
-    name: str
-    argument: str = ""
 
 
 class GatewayRuntime:
@@ -99,34 +92,22 @@ class GatewayRuntime:
 
     async def _handle_inbound_message(self, message: InboundMessage) -> None:
         route_key = message.route_key
-        role_command = parse_role_command(message.text)
-        if role_command is not None:
-            response_text = await self._handle_role_command(
-                route_key,
-                message,
-                role_command.action,
-                role_command.argument,
-            )
+        command_result = await dispatch_gateway_command(
+            GatewayCommandContext(
+                coordinator=self._context.coordinator,
+                workspace=self._context.workspace,
+                session_service=self._session_service,
+                route_key=route_key,
+                address=message.address,
+                metadata=message.metadata,
+            ),
+            message.text,
+        )
+        if command_result is not None:
             await self._bus.publish_outbound(
                 OutboundMessage(
                     address=message.address,
-                    text=response_text,
-                    metadata=dict(message.metadata),
-                )
-            )
-            return
-
-        command = _parse_session_command(message.text)
-        if command is not None:
-            response_text = await self._handle_session_command(
-                route_key,
-                message,
-                command,
-            )
-            await self._bus.publish_outbound(
-                OutboundMessage(
-                    address=message.address,
-                    text=response_text,
+                    text=command_result.text,
                     metadata=dict(message.metadata),
                 )
             )
@@ -150,13 +131,15 @@ class GatewayRuntime:
                 ),
             )
             content = execution.response_text.strip()
-            if not content:
-                content = "Model returned no text content."
             await self._session_service.touch_route_session(
                 route_key,
                 route_session.session_name,
                 updated_at=execution.session.updated_at,
             )
+            if not content and execution.delegated and not execution.completed:
+                return
+            if not content:
+                content = "Model returned no text content."
         except ValueError as exc:
             content = str(exc)
         except RuntimeError as exc:
@@ -168,149 +151,6 @@ class GatewayRuntime:
                 metadata=dict(message.metadata),
             )
         )
-
-    async def _handle_role_command(
-        self,
-        route_key: str,
-        message: InboundMessage,
-        action: str,
-        argument: str,
-    ) -> str:
-        route_session = await self._session_service.current_route_session(
-            route_key,
-        )
-        await self._session_service.remember_delivery_target(
-            route_session.session_name,
-            message.address,
-            message.metadata,
-        )
-        try:
-            return await execute_role_command(
-                self._context.coordinator,
-                route_session.session_name,
-                RoleCommand(action=action, argument=argument),
-            )
-        except ValueError as exc:
-            return str(exc)
-
-    async def _handle_session_command(
-        self,
-        route_key: str,
-        message: InboundMessage,
-        command: SessionCommand,
-    ) -> str:
-        if command.name == "help":
-            current = await self._session_service.current_route_session(
-                route_key,
-            )
-            await self._session_service.remember_delivery_target(
-                current.session_name,
-                message.address,
-                message.metadata,
-            )
-            return _session_help_text()
-
-        if command.name == "list":
-            sessions = await self._session_service.list_route_sessions(
-                route_key,
-            )
-            await self._session_service.remember_delivery_target(
-                sessions[0].session_name,
-                message.address,
-                message.metadata,
-            )
-            return _format_route_session_list(sessions)
-
-        if command.name == "current":
-            current = await self._session_service.current_route_session(
-                route_key,
-            )
-            await self._session_service.remember_delivery_target(
-                current.session_name,
-                message.address,
-                message.metadata,
-            )
-            return _format_current_route_session(current)
-
-        if command.name == "new":
-            created = await self._session_service.create_route_session(
-                route_key,
-                title=(command.argument or None),
-            )
-            await self._session_service.remember_delivery_target(
-                created.session_name,
-                message.address,
-                message.metadata,
-            )
-            return (
-                "Switched to a new session: "
-                f"{created.title} [{created.short_id}]"
-            )
-
-        if command.name == "switch":
-            if not command.argument:
-                return "Usage: /switch <number>"
-            try:
-                index = int(command.argument)
-            except ValueError:
-                return "Session number must be an integer."
-            try:
-                selected = await self._session_service.switch_route_session(
-                    route_key,
-                    index,
-                )
-            except ValueError as exc:
-                return str(exc)
-            await self._session_service.remember_delivery_target(
-                selected.session_name,
-                message.address,
-                message.metadata,
-            )
-            return (
-                "Switched to session "
-                f"{index}: {selected.title} [{selected.short_id}]"
-            )
-
-        if command.name == "rename":
-            if not command.argument:
-                return "Usage: /rename <title>"
-            try:
-                renamed = await self._session_service.rename_current_route_session(
-                    route_key,
-                    command.argument,
-                )
-            except ValueError as exc:
-                return str(exc)
-            await self._session_service.remember_delivery_target(
-                renamed.session_name,
-                message.address,
-                message.metadata,
-            )
-            return (
-                "Renamed current session to "
-                f"{renamed.title} [{renamed.short_id}]"
-            )
-
-        if command.name == "delete":
-            result = await self._session_service.delete_current_route_session(
-                route_key,
-            )
-            await self._session_service.remember_delivery_target(
-                result.current.session_name,
-                message.address,
-                message.metadata,
-            )
-            if result.created_replacement:
-                return (
-                    "Deleted the last session and created a fresh one: "
-                    f"{result.current.title} [{result.current.short_id}]"
-                )
-            return (
-                "Deleted the current session. "
-                f"Now using {result.current.title} [{result.current.short_id}]"
-            )
-
-        return _session_help_text()
 
     def _completion_callback_for_session(
         self,
@@ -445,92 +285,3 @@ class GatewayRuntime:
                 lock = asyncio.Lock()
                 self._route_locks[route_key] = lock
             return lock
-
-
-
-def _parse_session_command(text: str) -> SessionCommand | None:
-    cleaned = text.strip()
-    if not cleaned.startswith("/"):
-        return None
-
-    command_token, remainder = _split_command_parts(cleaned)
-
-    if command_token == "/session":
-        subcommand, remainder = _split_command_parts(remainder)
-        mapping = {
-            "help": "help",
-            "list": "list",
-            "ls": "list",
-            "current": "current",
-            "new": "new",
-            "switch": "switch",
-            "rename": "rename",
-            "delete": "delete",
-        }
-        mapped = mapping.get(subcommand.lstrip("/"))
-        if mapped is None:
-            return SessionCommand("help")
-        return SessionCommand(mapped, remainder)
-
-    if command_token == "/new":
-        return SessionCommand("new", remainder)
-    if command_token == "/ls":
-        return SessionCommand("list")
-    if command_token == "/current":
-        return SessionCommand("current")
-    if command_token == "/switch":
-        return SessionCommand("switch", remainder)
-    if command_token == "/rename":
-        return SessionCommand("rename", remainder)
-    if command_token == "/delete":
-        return SessionCommand("delete")
-    if command_token == "/help":
-        return SessionCommand("help")
-    return None
-
-
-def _split_command_parts(text: str) -> tuple[str, str]:
-    cleaned = text.strip()
-    if not cleaned:
-        return "", ""
-
-    parts = cleaned.split(maxsplit=1)
-    raw_token = parts[0].strip().lower()
-    remainder = parts[1].strip() if len(parts) >= 2 else ""
-    command_token = raw_token.split("@", 1)[0]
-    return command_token, remainder
-
-
-def _session_help_text() -> str:
-    return "\n".join(
-        [
-            "Session commands:",
-            "/new [title] - Start a new session",
-            "/ls - List sessions in this chat",
-            "/switch <number> - Switch to a session",
-            "/rename <title> - Rename the current session",
-            "/delete - Delete the current session",
-            "/current - Show the current session",
-            "/session ... - Alias for the same commands",
-        ]
-    )
-
-
-def _format_current_route_session(route_session: RouteSessionSummary) -> str:
-    return (
-        "Current session: "
-        f"{route_session.title} [{route_session.short_id}]"
-    )
-
-
-def _format_route_session_list(
-    sessions: list[RouteSessionSummary],
-) -> str:
-    lines = ["Sessions for this chat:"]
-    for index, route_session in enumerate(sessions, start=1):
-        marker = "*" if index == 1 else " "
-        lines.append(
-            f"{marker} {index}. {route_session.title} [{route_session.short_id}]"
-        )
-    lines.append("Use /switch <number> to change the current session.")
-    return "\n".join(lines)

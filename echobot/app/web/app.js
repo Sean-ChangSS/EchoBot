@@ -34,8 +34,10 @@ import {
 } from "./modules/utils.js";
 
 const layout = createLayoutModule({
+    addMessage: addMessage,
     formatTimestamp: formatTimestamp,
     requestJson: requestJson,
+    setRunStatus: setRunStatus,
 });
 
 const live2d = createLive2DModule({
@@ -145,6 +147,7 @@ async function initializePage() {
     try {
         const config = await requestJson("/api/web/config");
         UI_STATE.config = config;
+        layout.applyRuntimeConfig(config.runtime);
         const activeLive2DConfig = live2d.applyConfigToUI(config);
 
         live2d.initializePixiApplication();
@@ -355,6 +358,11 @@ function wireBasicEvents() {
     if (DOM.routeModeSelect) {
         DOM.routeModeSelect.addEventListener("change", () => {
             void sessions.handleRouteModeChange();
+        });
+    }
+    if (DOM.delegatedAckCheckbox) {
+        DOM.delegatedAckCheckbox.addEventListener("change", () => {
+            void layout.handleDelegatedAckToggle();
         });
     }
     if (DOM.roleSidebarToggle) {

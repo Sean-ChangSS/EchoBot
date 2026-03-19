@@ -238,14 +238,23 @@ class WebStageConfigModel(BaseModel):
     backgrounds: list[WebStageBackgroundModel] = Field(default_factory=list)
 
 
+class WebRuntimeConfigModel(BaseModel):
+    delegated_ack_enabled: bool = True
+
+
 class WebConfigResponse(BaseModel):
     session_name: str = "default"
     role_name: str = "default"
     route_mode: RouteMode = DEFAULT_ROUTE_MODE
+    runtime: WebRuntimeConfigModel = Field(default_factory=WebRuntimeConfigModel)
     live2d: WebLive2DConfigModel = Field(default_factory=WebLive2DConfigModel)
     stage: WebStageConfigModel = Field(default_factory=WebStageConfigModel)
     asr: WebASRConfigModel = Field(default_factory=WebASRConfigModel)
     tts: WebTTSConfigModel = Field(default_factory=WebTTSConfigModel)
+
+
+class UpdateWebRuntimeConfigRequest(BaseModel):
+    delegated_ack_enabled: bool
 
 
 class ASRTranscriptionResponse(BaseModel):

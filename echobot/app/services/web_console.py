@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import quote
 
 from ...asr import ASRService
+from ...runtime.settings import RuntimeSettingsStore
 from ...tts import TTSService
 
 DEFAULT_LIP_SYNC_PARAMETER_IDS = [
@@ -83,6 +84,9 @@ class WebConsoleService:
         self._workspace = workspace
         self._tts_service = tts_service
         self._asr_service = asr_service
+        self._runtime_settings_store = RuntimeSettingsStore(
+            workspace / ".echobot" / "runtime_settings.json",
+        )
         self._workspace_live2d_root = workspace / ".echobot" / "live2d"
         self._workspace_stage_background_root = workspace / ".echobot" / "web" / "backgrounds"
         self._builtin_live2d_root = Path(__file__).resolve().parent.parent / "builtin_live2d"
@@ -104,6 +108,7 @@ class WebConsoleService:
         session_name: str,
         role_name: str,
         route_mode: str,
+        delegated_ack_enabled: bool,
     ) -> dict[str, Any]:
         live2d = await asyncio.to_thread(self._discover_live2d_model_sync)
         stage = await asyncio.to_thread(self._build_stage_config_sync)
@@ -111,6 +116,9 @@ class WebConsoleService:
             "session_name": session_name,
             "role_name": role_name,
             "route_mode": route_mode,
+            "runtime": {
+                "delegated_ack_enabled": bool(delegated_ack_enabled),
+            },
             "live2d": live2d or self._empty_live2d_config(),
             "stage": stage,
             "asr": asdict(await self._asr_service.status_snapshot()),
@@ -137,6 +145,18 @@ class WebConsoleService:
 
     async def build_stage_config(self) -> dict[str, Any]:
         return await asyncio.to_thread(self._build_stage_config_sync)
+
+    async def save_runtime_settings(
+        self,
+        *,
+        delegated_ack_enabled: bool,
+    ) -> dict[str, Any]:
+        settings = await asyncio.to_thread(
+            self._runtime_settings_store.update_named_value,
+            "delegated_ack_enabled",
+            bool(delegated_ack_enabled),
+        )
+        return settings.to_dict()
 
     def resolve_stage_background_asset(self, asset_path: str) -> Path:
         source, relative_path = self._parse_stage_background_asset_path(asset_path)

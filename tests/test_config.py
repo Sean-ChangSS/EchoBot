@@ -107,3 +107,72 @@ class RuntimeBootstrapConfigTests(unittest.TestCase):
                 )
 
             self.assertEqual(77, context.session_runner._default_max_steps)
+
+    def test_build_runtime_context_reads_delegated_ack_toggle_from_env_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            env_file = workspace / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "LLM_API_KEY=test-key",
+                        "LLM_MODEL=test-model",
+                        "LLM_BASE_URL=https://example.com/v1",
+                        "LLM_TIMEOUT=60",
+                        "ECHOBOT_DELEGATED_ACK_ENABLED=false",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                context = build_runtime_context(
+                    RuntimeOptions(
+                        workspace=workspace,
+                        no_memory=True,
+                        no_tools=True,
+                        no_skills=True,
+                        no_heartbeat=True,
+                    ),
+                    load_session_state=False,
+                )
+
+            self.assertFalse(context.coordinator._delegated_ack_enabled)
+
+    def test_build_runtime_context_reads_delegated_ack_toggle_from_runtime_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            env_file = workspace / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "LLM_API_KEY=test-key",
+                        "LLM_MODEL=test-model",
+                        "LLM_BASE_URL=https://example.com/v1",
+                        "LLM_TIMEOUT=60",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            settings_path = workspace / ".echobot" / "runtime_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                '{"delegated_ack_enabled": false}\n',
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {}, clear=True):
+                context = build_runtime_context(
+                    RuntimeOptions(
+                        workspace=workspace,
+                        no_memory=True,
+                        no_tools=True,
+                        no_skills=True,
+                        no_heartbeat=True,
+                    ),
+                    load_session_state=False,
+                )
+
+            self.assertFalse(context.coordinator._delegated_ack_enabled)

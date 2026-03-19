@@ -213,6 +213,44 @@ class ChatAgentSessionTests(unittest.TestCase):
                     current_session=current_session,
                 )
 
+    def test_handle_session_command_can_rename_current_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_store = SessionStore(Path(temp_dir) / "sessions")
+            current_session = session_store.create_session("demo")
+
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                renamed_session = handle_session_command(
+                    "/session rename renamed",
+                    session_store=session_store,
+                    current_session=current_session,
+                )
+
+            output = stream.getvalue()
+            self.assertEqual("renamed", renamed_session.name)
+            self.assertEqual("renamed", session_store.get_current_session_name())
+            self.assertIn("Renamed current session to: renamed", output)
+
+    def test_handle_session_command_can_delete_current_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_store = SessionStore(Path(temp_dir) / "sessions")
+            other_session = session_store.create_session("other")
+            current_session = session_store.create_session("demo")
+            session_store.set_current_session(current_session.name)
+
+            stream = io.StringIO()
+            with redirect_stdout(stream):
+                next_session = handle_session_command(
+                    "/session delete",
+                    session_store=session_store,
+                    current_session=current_session,
+                )
+
+            output = stream.getvalue()
+            self.assertEqual("other", next_session.name)
+            self.assertEqual("other", session_store.get_current_session_name())
+            self.assertIn("Deleted current session. Now using: other", output)
+
 
 class FakeProvider(LLMProvider):
     async def generate(

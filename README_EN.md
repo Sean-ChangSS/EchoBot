@@ -291,7 +291,7 @@ When running in the terminal or interacting via a chat platform, the following b
 | `/rename` | `/rename <title>` | Rename the current session |
 | `/delete` | `/delete` | Delete the current session |
 | `/current` | `/current` | View current session info |
-| `/help` | `/help` | Show command help |
+| `/help` | `/help` | Show global command help |
 
 ### 🎭 Role Management
 
@@ -302,6 +302,41 @@ When running in the terminal or interacting via a chat platform, the following b
 | `/role current` | `/role current` | View current character card details |
 | `/role set` | `/role set <name>` | Switch to a specified character card |
 | `/role help` | `/role help` | Show role command help |
+
+### 🧭 Route Mode
+
+These route mode commands use the same session routing setting as the route mode switch in the web UI~
+
+| Command | Usage | Description |
+|---|---|---|
+| `/route` | `/route` | Show the current route mode for this session |
+| `/route current` | `/route current` | Show the current route mode for this session |
+| `/route auto` | `/route auto` | Switch to automatic routing |
+| `/route chat` | `/route chat` | Switch to chat-only mode |
+| `/route agent` | `/route agent` | Switch to force-agent mode |
+| `/route set` | `/route set <auto\|chat_only\|force_agent>` | Set the route mode explicitly |
+| `/route help` | `/route help` | Show route mode command help |
+
+### ⚙️ Runtime Configuration
+
+| Command | Usage | Description |
+|---|---|---|
+| `/runtime` | `/runtime` | List runtime settings and current values |
+| `/runtime list` | `/runtime list` | List runtime settings and current values |
+| `/runtime get` | `/runtime get <name>` | Show one runtime setting |
+| `/runtime set` | `/runtime set <name> <value>` | Update one runtime setting |
+| `/runtime help` | `/runtime help` | Show runtime command help |
+
+Example: use `delegated_ack_enabled` to control whether EchoBot sends a quick notice before a background task starts.
+
+```text
+/runtime get delegated_ack_enabled
+/runtime set delegated_ack_enabled on
+/runtime set delegated_ack_enabled off
+```
+
+- When set to `on`: EchoBot sends a short "started working" style message first, then sends the final result when the task finishes.
+- When set to `off`: the background task runs silently until the final result is ready.
 
 ---
 

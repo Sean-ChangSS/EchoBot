@@ -13,7 +13,6 @@ from echobot.channels import (
     load_channels_config,
 )
 from echobot.gateway import DeliveryStore, GatewayRuntime, RouteSessionStore
-from echobot.gateway.runtime import _parse_session_command
 from echobot.orchestration import (
     ConversationCoordinator,
     DecisionEngine,
@@ -120,6 +119,8 @@ class FakeCronSetupRunner:
 
 def build_test_runtime(
     workspace: Path,
+    *,
+    delegated_ack_enabled: bool = True,
 ) -> tuple[RuntimeContext, SessionStore]:
     agent = AgentCore(FakeProvider())
     session_store = SessionStore(workspace / "sessions")
@@ -132,6 +133,7 @@ def build_test_runtime(
         decision_engine=DecisionEngine(),
         roleplay_engine=RoleplayEngine(AgentCore(FakeProvider()), role_registry),
         role_registry=role_registry,
+        delegated_ack_enabled=delegated_ack_enabled,
     )
     context = RuntimeContext(
         workspace=workspace,
@@ -231,24 +233,6 @@ class RouteSessionStoreTests(unittest.TestCase):
             current = reloaded.get_current_session(route_key)
             self.assertEqual(first.session_name, current.session_name)
             self.assertEqual("Personal", current.title)
-
-
-class CommandParsingTests(unittest.TestCase):
-    def test_parse_session_alias_and_telegram_style_command(self) -> None:
-        command = _parse_session_command("/session switch 2")
-        self.assertIsNotNone(command)
-        assert command is not None
-        self.assertEqual("switch", command.name)
-        self.assertEqual("2", command.argument)
-
-        command = _parse_session_command("/ls@EchoBot")
-        self.assertIsNotNone(command)
-        assert command is not None
-        self.assertEqual("list", command.name)
-
-    def test_parse_does_not_match_unknown_prefix(self) -> None:
-        self.assertIsNone(_parse_session_command("/newyork"))
-        self.assertIsNone(_parse_session_command("/switchboard"))
 
 
 class GatewayRuntimeTests(unittest.IsolatedAsyncioTestCase):
@@ -351,6 +335,122 @@ class GatewayRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("* default", listed.text)
             self.assertEqual("Switched role to: default", switched.text)
 
+    async def test_runtime_command_can_toggle_task_start_tip(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            context, session_store = build_test_runtime(workspace)
+            bus = MessageBus()
+            delivery_store = DeliveryStore(workspace / "delivery.json")
+            route_session_store = RouteSessionStore(workspace / "route_sessions.json")
+            gateway = GatewayRuntime(
+                context,
+                bus,
+                delivery_store=delivery_store,
+                route_session_store=route_session_store,
+            )
+
+            await gateway.handle_inbound_message(
+                make_inbound("/runtime get delegated_ack_enabled", message_id=24),
+            )
+            current = await bus.consume_outbound()
+            self.assertEqual(
+                "delegated_ack_enabled = on",
+                current.text,
+            )
+
+            await gateway.handle_inbound_message(
+                make_inbound("/runtime set delegated_ack_enabled off", message_id=25),
+            )
+            disabled = await bus.consume_outbound()
+            self.assertEqual(
+                "Updated runtime setting: delegated_ack_enabled = off",
+                disabled.text,
+            )
+            self.assertFalse(context.coordinator.delegated_ack_enabled)
+
+            settings_path = workspace / ".echobot" / "runtime_settings.json"
+            self.assertTrue(settings_path.exists())
+
+            inbound = make_inbound("Please set a cron reminder", message_id=26)
+            await gateway.handle_inbound_message(inbound)
+
+            outbound = await asyncio.wait_for(bus.consume_outbound(), timeout=0.2)
+            self.assertEqual("done", outbound.text)
+            self.assertTrue(outbound.metadata["async_result"])
+            self.assertEqual("completed", outbound.metadata["job_status"])
+
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(bus.consume_outbound(), timeout=0.05)
+
+            current_session = route_session_store.get_current_session(inbound.route_key)
+            session = session_store.load_session(current_session.session_name)
+            history_contents = [message.content for message in session.history]
+            self.assertNotIn("working", history_contents)
+            self.assertIn("done", history_contents)
+
+    async def test_route_mode_command_can_switch_per_route_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            context, session_store = build_test_runtime(workspace)
+            bus = MessageBus()
+            delivery_store = DeliveryStore(workspace / "delivery.json")
+            route_session_store = RouteSessionStore(workspace / "route_sessions.json")
+            gateway = GatewayRuntime(
+                context,
+                bus,
+                delivery_store=delivery_store,
+                route_session_store=route_session_store,
+            )
+            route_key = make_inbound("ping").route_key
+
+            await gateway.handle_inbound_message(
+                make_inbound("/route current", message_id=27),
+            )
+            current = await bus.consume_outbound()
+            self.assertEqual("Current route mode: auto", current.text)
+
+            await gateway.handle_inbound_message(
+                make_inbound("/route chat", message_id=28),
+            )
+            switched_to_chat = await bus.consume_outbound()
+            self.assertEqual(
+                "Switched route mode to: chat_only",
+                switched_to_chat.text,
+            )
+
+            current_route_session = route_session_store.get_current_session(route_key)
+            session = session_store.load_session(current_route_session.session_name)
+            self.assertEqual("chat_only", session.metadata["route_mode"])
+
+            await gateway.handle_inbound_message(
+                make_inbound("Please set a cron reminder", message_id=29),
+            )
+            chat_reply = await asyncio.wait_for(bus.consume_outbound(), timeout=0.2)
+            self.assertEqual("pong", chat_reply.text)
+            self.assertNotIn("async_result", chat_reply.metadata)
+
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(bus.consume_outbound(), timeout=0.05)
+
+            await gateway.handle_inbound_message(
+                make_inbound("/route agent", message_id=30),
+            )
+            switched_to_agent = await bus.consume_outbound()
+            self.assertEqual(
+                "Switched route mode to: force_agent",
+                switched_to_agent.text,
+            )
+
+            await gateway.handle_inbound_message(
+                make_inbound("How are you today?", message_id=31),
+            )
+            first = await asyncio.wait_for(bus.consume_outbound(), timeout=0.2)
+            second = await asyncio.wait_for(bus.consume_outbound(), timeout=0.2)
+
+            self.assertEqual("working", first.text)
+            self.assertEqual("done", second.text)
+            self.assertTrue(second.metadata["async_result"])
+
     async def test_agent_style_message_returns_immediate_and_final_reply(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -376,6 +476,40 @@ class GatewayRuntimeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual("done", second.text)
             self.assertTrue(second.metadata["async_result"])
             self.assertEqual("completed", second.metadata["job_status"])
+
+    async def test_agent_style_message_can_disable_immediate_ack(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            context, session_store = build_test_runtime(
+                workspace,
+                delegated_ack_enabled=False,
+            )
+            bus = MessageBus()
+            delivery_store = DeliveryStore(workspace / "delivery.json")
+            route_session_store = RouteSessionStore(workspace / "route_sessions.json")
+            gateway = GatewayRuntime(
+                context,
+                bus,
+                delivery_store=delivery_store,
+                route_session_store=route_session_store,
+            )
+
+            inbound = make_inbound("Please set a cron reminder", message_id=8)
+            await gateway.handle_inbound_message(inbound)
+
+            outbound = await asyncio.wait_for(bus.consume_outbound(), timeout=0.2)
+            self.assertEqual("done", outbound.text)
+            self.assertTrue(outbound.metadata["async_result"])
+            self.assertEqual("completed", outbound.metadata["job_status"])
+
+            with self.assertRaises(asyncio.TimeoutError):
+                await asyncio.wait_for(bus.consume_outbound(), timeout=0.05)
+
+            current = route_session_store.get_current_session(inbound.route_key)
+            session = session_store.load_session(current.session_name)
+            history_contents = [message.content for message in session.history]
+            self.assertNotIn("working", history_contents)
+            self.assertIn("done", history_contents)
 
     async def test_deleting_current_route_session_cancels_background_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

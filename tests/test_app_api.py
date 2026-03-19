@@ -27,6 +27,7 @@ from echobot.orchestration import (
 )
 from echobot.providers.base import LLMProvider
 from echobot.runtime.bootstrap import RuntimeContext, RuntimeOptions
+from echobot.runtime.settings import RuntimeSettingsStore
 from echobot.runtime.session_runner import SessionAgentRunner
 from echobot.runtime.sessions import SessionStore
 from echobot.scheduling.cron import (
@@ -304,6 +305,7 @@ def build_test_context(options: RuntimeOptions) -> RuntimeContext:
         decision_engine=DecisionEngine(),
         roleplay_engine=RoleplayEngine(AgentCore(FakeProvider()), role_registry),
         role_registry=role_registry,
+        delegated_ack_enabled=_delegated_ack_enabled(options),
     )
     heartbeat_service = None
     if not options.no_heartbeat:
@@ -350,6 +352,7 @@ def build_slow_agent_test_context(options: RuntimeOptions) -> RuntimeContext:
         decision_engine=DecisionEngine(),
         roleplay_engine=RoleplayEngine(AgentCore(FakeProvider()), role_registry),
         role_registry=role_registry,
+        delegated_ack_enabled=_delegated_ack_enabled(options),
     )
     heartbeat_service = None
     if not options.no_heartbeat:
@@ -396,6 +399,7 @@ def build_slow_ack_test_context(options: RuntimeOptions) -> RuntimeContext:
         decision_engine=DecisionEngine(),
         roleplay_engine=RoleplayEngine(AgentCore(SlowAckProvider()), role_registry),
         role_registry=role_registry,
+        delegated_ack_enabled=_delegated_ack_enabled(options),
     )
     heartbeat_service = None
     if not options.no_heartbeat:
@@ -436,6 +440,17 @@ def build_test_tts_service(_workspace: Path) -> TTSService:
 
 def build_test_asr_service(_workspace: Path) -> FakeASRService:
     return FakeASRService()
+
+
+def _delegated_ack_enabled(options: RuntimeOptions) -> bool:
+    if options.delegated_ack_enabled is None:
+        store = RuntimeSettingsStore(
+            (options.workspace or Path(".")).resolve()
+            / ".echobot"
+            / "runtime_settings.json",
+        )
+        return store.load().delegated_ack_enabled is not False
+    return bool(options.delegated_ack_enabled)
 
 
 def write_test_live2d_model(workspace: Path) -> None:
@@ -1098,6 +1113,58 @@ class AppApiTests(unittest.TestCase):
             self.assertEqual("completed", final.json()["status"])
             self.assertEqual("done", final.json()["response"])
 
+    def test_chat_endpoint_can_disable_agent_ack(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            app = create_app(
+                runtime_options=RuntimeOptions(
+                    workspace=workspace,
+                    delegated_ack_enabled=False,
+                    no_tools=True,
+                    no_skills=True,
+                    no_memory=True,
+                    no_heartbeat=True,
+                ),
+                channel_config_path=workspace / ".echobot" / "channels.json",
+                context_builder=build_test_context,
+            )
+
+            with TestClient(app) as client:
+                replied = client.post(
+                    "/api/chat",
+                    json={
+                        "session_name": "demo",
+                        "prompt": "Please set a cron reminder",
+                    },
+                )
+
+                self.assertEqual(200, replied.status_code)
+                payload = replied.json()
+                self.assertTrue(payload["delegated"])
+                self.assertFalse(payload["completed"])
+                self.assertEqual("running", payload["status"])
+                self.assertEqual("", payload["response"])
+                self.assertTrue(payload["job_id"])
+
+                job_id = payload["job_id"]
+                final = None
+                for _ in range(20):
+                    final = client.get(f"/api/chat/jobs/{job_id}")
+                    if final.json()["status"] != "running":
+                        break
+                    time.sleep(0.01)
+
+                detail = client.get("/api/sessions/demo")
+
+            assert final is not None
+            self.assertEqual(200, final.status_code)
+            self.assertEqual("completed", final.json()["status"])
+            self.assertEqual("done", final.json()["response"])
+            self.assertEqual(200, detail.status_code)
+            history_contents = [item["content"] for item in detail.json()["history"]]
+            self.assertNotIn("working", history_contents)
+            self.assertIn("done", history_contents)
+
     def test_chat_job_cancel_endpoint_stops_running_background_job(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
@@ -1469,6 +1536,7 @@ class AppApiTests(unittest.TestCase):
                 self.assertIn('id="role-editor"', page.text)
                 self.assertIn('id="tts-provider-select"', page.text)
                 self.assertIn('id="route-mode-select"', page.text)
+                self.assertIn('id="delegated-ack-checkbox"', page.text)
                 self.assertIn('id="heartbeat-panel"', page.text)
                 self.assertIn('id="heartbeat-input"', page.text)
                 self.assertIn('id="heartbeat-save-button"', page.text)
@@ -1499,6 +1567,7 @@ class AppApiTests(unittest.TestCase):
                 payload = config.json()
                 self.assertEqual("default", payload["session_name"])
                 self.assertEqual("auto", payload["route_mode"])
+                self.assertTrue(payload["runtime"]["delegated_ack_enabled"])
                 self.assertEqual("default", payload["stage"]["default_background_key"])
                 self.assertEqual("default", payload["stage"]["backgrounds"][0]["key"])
                 self.assertEqual("不使用背景", payload["stage"]["backgrounds"][0]["label"])
@@ -1549,6 +1618,80 @@ class AppApiTests(unittest.TestCase):
                 self.assertGreater(len(builtin_background_response.content), 0)
                 self.assertEqual(200, texture_response.status_code)
                 self.assertIn("DisplayInfo", model_response.text)
+
+    def test_web_console_runtime_toggle_updates_config_and_persists(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            settings_path = workspace / ".echobot" / "runtime_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "delegated_ack_enabled": True,
+                        "future_setting": "keep-me",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            app = create_app(
+                runtime_options=RuntimeOptions(
+                    workspace=workspace,
+                    no_tools=True,
+                    no_skills=True,
+                    no_memory=True,
+                    no_heartbeat=True,
+                ),
+                channel_config_path=workspace / ".echobot" / "channels.json",
+                context_builder=build_test_context,
+                tts_service_builder=build_test_tts_service,
+                asr_service_builder=build_test_asr_service,
+            )
+
+            with TestClient(app) as client:
+                updated = client.patch(
+                    "/api/web/runtime",
+                    json={
+                        "delegated_ack_enabled": False,
+                    },
+                )
+                config = client.get("/api/web/config")
+
+            self.assertEqual(200, updated.status_code)
+            self.assertFalse(updated.json()["delegated_ack_enabled"])
+            self.assertEqual(200, config.status_code)
+            self.assertFalse(config.json()["runtime"]["delegated_ack_enabled"])
+
+            self.assertTrue(settings_path.exists())
+            settings_payload = json.loads(settings_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                {
+                    "delegated_ack_enabled": False,
+                    "future_setting": "keep-me",
+                },
+                settings_payload,
+            )
+
+            restarted_app = create_app(
+                runtime_options=RuntimeOptions(
+                    workspace=workspace,
+                    no_tools=True,
+                    no_skills=True,
+                    no_memory=True,
+                    no_heartbeat=True,
+                ),
+                channel_config_path=workspace / ".echobot" / "channels.json",
+                context_builder=build_test_context,
+                tts_service_builder=build_test_tts_service,
+                asr_service_builder=build_test_asr_service,
+            )
+
+            with TestClient(restarted_app) as client:
+                restarted_config = client.get("/api/web/config")
+
+            self.assertEqual(200, restarted_config.status_code)
+            self.assertFalse(restarted_config.json()["runtime"]["delegated_ack_enabled"])
 
     def test_web_console_stage_background_upload_and_asset_routes_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

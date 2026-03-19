@@ -42,12 +42,14 @@ class ConversationCoordinator:
         decision_engine: DecisionEngine,
         roleplay_engine: RoleplayEngine,
         role_registry: RoleCardRegistry,
+        delegated_ack_enabled: bool = True,
     ) -> None:
         self._session_store = session_store
         self._agent_runner = agent_runner
         self._decision_engine = decision_engine
         self._roleplay_engine = roleplay_engine
         self._role_registry = role_registry
+        self._delegated_ack_enabled = delegated_ack_enabled
         self._jobs = ConversationJobStore()
         self._session_locks: dict[str, asyncio.Lock] = {}
         self._session_locks_guard = asyncio.Lock()
@@ -55,6 +57,13 @@ class ConversationCoordinator:
         self._job_tasks: dict[str, asyncio.Task[None]] = {}
         self._deleted_sessions: set[str] = set()
         self._deleted_sessions_guard = asyncio.Lock()
+
+    @property
+    def delegated_ack_enabled(self) -> bool:
+        return self._delegated_ack_enabled
+
+    def set_delegated_ack_enabled(self, enabled: bool) -> None:
+        self._delegated_ack_enabled = bool(enabled)
 
     async def handle_user_turn(
         self,
@@ -131,24 +140,27 @@ class ConversationCoordinator:
                     compressed_summary=session.compressed_summary,
                 )
 
-            immediate_response = await self._roleplay_engine.delegated_ack(
-                session=session,
-                user_input=prompt,
-                image_urls=image_urls,
-                role_card=role_card,
-            )
+            immediate_response = ""
+            if self._delegated_ack_enabled:
+                immediate_response = await self._roleplay_engine.delegated_ack(
+                    session=session,
+                    user_input=prompt,
+                    image_urls=image_urls,
+                    role_card=role_card,
+                )
             handoff_text = _build_agent_handoff_text(
                 session=session,
             )
-            session.history.extend(
-                [
-                    LLMMessage(
-                        role="user",
-                        content=build_user_message_content(prompt, image_urls),
-                    ),
-                    LLMMessage(role="assistant", content=immediate_response),
-                ]
+            session.history.append(
+                LLMMessage(
+                    role="user",
+                    content=build_user_message_content(prompt, image_urls),
+                )
             )
+            if immediate_response.strip():
+                session.history.append(
+                    LLMMessage(role="assistant", content=immediate_response)
+                )
             await asyncio.to_thread(self._session_store.save_session, session)
             create_trace_run_id = getattr(self._agent_runner, "create_trace_run_id", None)
             trace_run_id = (
@@ -175,7 +187,8 @@ class ConversationCoordinator:
                     completion_callback=completion_callback,
                 ),
             )
-            await chunk_handler(immediate_response)
+            if immediate_response.strip():
+                await chunk_handler(immediate_response)
             return OrchestratedTurnResult(
                 session=session,
                 response_text=immediate_response,

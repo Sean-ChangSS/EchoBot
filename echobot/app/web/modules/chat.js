@@ -70,7 +70,7 @@ export function createChatModule(deps) {
             "你",
             { renderMode: "plain" },
         );
-        const assistantMessageId = addMessage(
+        let assistantMessageId = addMessage(
             "assistant",
             "...",
             "Echo",
@@ -110,15 +110,28 @@ export function createChatModule(deps) {
             }
             UI_STATE.currentRoleName = response.role_name || UI_STATE.currentRoleName;
 
-            let finalText = response.response || streamedText || "处理中...";
-            const immediateText = finalText;
-            let speakFinalText = true;
-            const startupSpeech = finalizeSpeechSession(speechSession, immediateText);
-            updateMessage(
-                assistantMessageId,
-                finalText,
-                response.completed ? "Echo" : "处理中",
+            const immediateText = String(response.response || streamedText || "").trim();
+            const hideImmediateReply = Boolean(
+                response.job_id
+                && response.status === "running"
+                && !immediateText,
             );
+            let finalText = immediateText || "处理中...";
+            let speakFinalText = true;
+            const startupSpeech = hideImmediateReply
+                ? Promise.resolve()
+                : finalizeSpeechSession(speechSession, finalText);
+            if (hideImmediateReply) {
+                removeMessage(assistantMessageId);
+                assistantMessageId = "";
+                finalText = "";
+            } else {
+                updateMessage(
+                    assistantMessageId,
+                    finalText,
+                    response.completed ? "Echo" : "处理中",
+                );
+            }
 
             if (response.job_id && response.status === "running") {
                 setActiveBackgroundJob(response.job_id);
@@ -127,7 +140,11 @@ export function createChatModule(deps) {
 
                 const finalJob = await pollChatJob(response.job_id);
                 finalText = finalJob.response || finalText || "任务已结束，但没有返回内容。";
-                updateMessage(assistantMessageId, finalText, "Echo");
+                if (assistantMessageId) {
+                    updateMessage(assistantMessageId, finalText, "Echo");
+                } else {
+                    assistantMessageId = addMessage("assistant", finalText, "Echo");
+                }
 
                 await startupSpeech;
                 if (finalText === immediateText || finalJob.status === "cancelled") {
@@ -162,7 +179,7 @@ export function createChatModule(deps) {
         } catch (error) {
             console.error(error);
             stopSpeechPlayback();
-            if (!streamedText.trim()) {
+            if (assistantMessageId && !streamedText.trim()) {
                 removeMessage(assistantMessageId);
             }
             addMessage("system", `请求失败：${error.message || error}`, "状态");

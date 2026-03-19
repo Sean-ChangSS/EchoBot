@@ -2,8 +2,10 @@ import { CRON_POLL_INTERVAL_MS, DOM, UI_STATE } from "./state.js";
 
 export function createLayoutModule(deps) {
     const {
+        addMessage,
         formatTimestamp,
         requestJson,
+        setRunStatus,
     } = deps;
 
     function ensureSidebarToggleButtons() {
@@ -637,8 +639,76 @@ export function createLayoutModule(deps) {
         }
     }
 
+    function applyRuntimeConfig(runtimeConfig) {
+        UI_STATE.delegatedAckEnabled = runtimeConfig
+            ? runtimeConfig.delegated_ack_enabled !== false
+            : true;
+
+        if (DOM.delegatedAckCheckbox) {
+            DOM.delegatedAckCheckbox.checked = UI_STATE.delegatedAckEnabled;
+        }
+        updateRuntimeControls();
+    }
+
+    async function handleDelegatedAckToggle() {
+        if (!DOM.delegatedAckCheckbox || UI_STATE.runtimeConfigLoading) {
+            return;
+        }
+
+        const nextValue = Boolean(DOM.delegatedAckCheckbox.checked);
+        if (nextValue === UI_STATE.delegatedAckEnabled) {
+            updateRuntimeControls();
+            return;
+        }
+
+        UI_STATE.runtimeConfigLoading = true;
+        updateRuntimeControls();
+        setRunStatus("正在更新后台任务提示设置...");
+
+        try {
+            const payload = await requestJson("/api/web/runtime", {
+                method: "PATCH",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                    delegated_ack_enabled: nextValue,
+                }),
+            });
+            if (UI_STATE.config) {
+                UI_STATE.config.runtime = payload;
+            }
+            applyRuntimeConfig(payload);
+            setRunStatus(
+                nextValue
+                    ? "已开启后台任务开始时先发提示"
+                    : "已关闭后台任务开始时先发提示",
+            );
+        } catch (error) {
+            console.error(error);
+            DOM.delegatedAckCheckbox.checked = UI_STATE.delegatedAckEnabled;
+            addMessage(
+                "system",
+                `更新后台任务提示设置失败：${error.message || error}`,
+                "状态",
+            );
+            setRunStatus(error.message || "更新后台任务提示设置失败");
+        } finally {
+            UI_STATE.runtimeConfigLoading = false;
+            updateRuntimeControls();
+        }
+    }
+
+    function updateRuntimeControls() {
+        if (DOM.delegatedAckCheckbox) {
+            DOM.delegatedAckCheckbox.disabled = UI_STATE.runtimeConfigLoading;
+        }
+    }
+
     return {
+        applyRuntimeConfig: applyRuntimeConfig,
         ensureSidebarToggleButtons: ensureSidebarToggleButtons,
+        handleDelegatedAckToggle: handleDelegatedAckToggle,
         stopSummaryButtonToggle: stopSummaryButtonToggle,
         restoreSettingsPanelState: restoreSettingsPanelState,
         handleSettingsPanelToggle: handleSettingsPanelToggle,

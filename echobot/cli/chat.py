@@ -6,13 +6,10 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from ..agent import AgentCore, AgentRunResult
+from ..commands.bindings import CliCommandContext, dispatch_cli_command
 from ..memory import ReMeLightSupport
 from ..models import LLMMessage
-from ..orchestration import (
-    ConversationCoordinator,
-    execute_role_command,
-    parse_role_command,
-)
+from ..orchestration import ConversationCoordinator
 from ..runtime.bootstrap import RuntimeOptions, build_runtime_context
 from ..runtime.scheduled_tasks import (
     build_cron_job_executor as build_shared_cron_job_executor,
@@ -27,9 +24,6 @@ from ..tools import ToolRegistry
 from .common import add_runtime_arguments, runtime_options_from_args
 from .session_commands import (
     clear_history,
-    handle_session_command_async,
-    is_session_command,
-    print_session_command_result,
     save_session_state,
 )
 
@@ -69,8 +63,11 @@ def print_help(
     print("Chat started.")
     print("Type exit or quit to stop.")
     print("Type clear or /clear to clear the conversation history.")
+    print("Type /help to show all commands.")
     print("Type /session help to manage saved sessions.")
     print("Type /role help to manage role cards.")
+    print("Type /route help to manage the route mode for this session.")
+    print("Type /runtime help to manage runtime options.")
     print(f"Current session: {session.name}")
     print(f"Memory support enabled: {'yes' if memory_support is not None else 'no'}")
     if memory_support is not None:
@@ -164,10 +161,17 @@ async def _main_async(args: argparse.Namespace) -> None:
     session_service = SessionService(
         session_store,
         context.agent_session_store,
+        coordinator=context.coordinator,
     )
     tool_registry = context.tool_registry
     skill_registry = context.skill_registry
     coordinator = context.coordinator
+    command_context = CliCommandContext(
+        coordinator=coordinator,
+        workspace=context.workspace,
+        session_service=session_service,
+        session_name=session.name,
+    )
     heartbeat_interval_seconds = (
         context.heartbeat_service.interval_seconds
         if context.heartbeat_service is not None
@@ -216,38 +220,22 @@ async def _main_async(args: argparse.Namespace) -> None:
                     context.agent_session_store.delete_session,
                     session.name,
                 )
+                command_context.session_name = session.name
                 print("History cleared.")
                 print()
                 continue
-            if is_session_command(prompt):
-                session = await coordinator.load_session(session.name)
-                try:
-                    result = await handle_session_command_async(
-                        prompt,
-                        session_service=session_service,
-                        current_session=session,
-                    )
-                except ValueError as exc:
-                    print(f"Session error: {exc}")
-                    print()
-                    continue
-
-                session = result.session
-                print_session_command_result(result)
+            try:
+                command_result = await dispatch_cli_command(
+                    command_context,
+                    prompt,
+                )
+            except ValueError as exc:
+                print(f"Session error: {exc}")
                 print()
                 continue
-            role_command = parse_role_command(prompt)
-            if role_command is not None:
-                try:
-                    print(
-                        await execute_role_command(
-                            coordinator,
-                            session.name,
-                            role_command,
-                        )
-                    )
-                except ValueError as exc:
-                    print(f"Role error: {exc}")
+            if command_result is not None:
+                session = await coordinator.load_session(command_context.session_name)
+                print(command_result.text)
                 print()
                 continue
 
@@ -255,10 +243,12 @@ async def _main_async(args: argparse.Namespace) -> None:
                 on_chunk, stream_started = _build_streamed_assistant_writer()
 
                 execution = await coordinator.handle_user_turn_stream(
-                    session.name,
+                    command_context.session_name,
                     prompt,
                     on_chunk=on_chunk,
-                    completion_callback=_build_async_cli_notifier(session.name),
+                    completion_callback=_build_async_cli_notifier(
+                        command_context.session_name
+                    ),
                 )
             except ValueError as exc:
                 print(f"Role error: {exc}")
@@ -270,8 +260,14 @@ async def _main_async(args: argparse.Namespace) -> None:
                 continue
 
             session = execution.session
+            command_context.session_name = session.name
             await asyncio.to_thread(save_session_state, session_store, session)
-            content = execution.response_text.strip() or "Model returned no text content."
+            content = execution.response_text.strip()
+            if not content and execution.delegated and not execution.completed:
+                print()
+                continue
+            if not content:
+                content = "Model returned no text content."
             if stream_started():
                 print()
             else:

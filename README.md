@@ -282,7 +282,7 @@ EchoBot 网页端支持半双工语音交互（播报期间会自动暂停收音
 | `/rename` | `/rename <标题>` | 重命名当前会话 |
 | `/delete` | `/delete` | 删除当前会话 |
 | `/current` | `/current` | 查看当前会话信息 |
-| `/help` | `/help` | 显示命令帮助 |
+| `/help` | `/help` | 显示全局命令帮助 |
 
 ### 🎭 Role 角色管理
 
@@ -293,6 +293,41 @@ EchoBot 网页端支持半双工语音交互（播报期间会自动暂停收音
 | `/role current` | `/role current` | 查看当前角色卡详情 |
 | `/role set` | `/role set <名称>` | 切换到指定角色卡 |
 | `/role help` | `/role help` | 显示角色命令帮助 |
+
+### 🧭 Route 路由模式
+
+这里的路由模式命令与网页端的路由模式切换保持一致，修改后会作用于同一套会话路由配置喵~
+
+| 命令 | 用法 | 说明 |
+|---|---|---|
+| `/route` | `/route` | 查看当前会话的路由模式 |
+| `/route current` | `/route current` | 查看当前会话的路由模式 |
+| `/route auto` | `/route auto` | 切换到自动决策模式 |
+| `/route chat` | `/route chat` | 切换到纯聊天模式 |
+| `/route agent` | `/route agent` | 切换到强制 Agent 模式 |
+| `/route set` | `/route set <auto\|chat_only\|force_agent>` | 显式设置路由模式 |
+| `/route help` | `/route help` | 显示路由模式命令帮助 |
+
+### ⚙️ Runtime 运行时配置
+
+| 命令 | 用法 | 说明 |
+|---|---|---|
+| `/runtime` | `/runtime` | 列出运行时配置及当前值 |
+| `/runtime list` | `/runtime list` | 列出运行时配置及当前值 |
+| `/runtime get` | `/runtime get <name>` | 查看某个运行时配置 |
+| `/runtime set` | `/runtime set <name> <value>` | 修改某个运行时配置 |
+| `/runtime help` | `/runtime help` | 显示运行时命令帮助 |
+
+示例：通过 `delegated_ack_enabled` 控制后台任务开始时是否先发送提示。
+
+```text
+/runtime get delegated_ack_enabled
+/runtime set delegated_ack_enabled on
+/runtime set delegated_ack_enabled off
+```
+
+- 设置为 `on`：当消息被判定为后台任务时，会先发送一条“开始处理”的提示，再在任务完成后返回结果。
+- 设置为 `off`：后台任务会静默执行，直到最终结果返回时才发送消息。
 
 ## 💖 致谢与参考项目
 

@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
 
+from ..commands.saved_sessions import (
+    SavedSessionCommandResult as SessionCommandResult,
+    execute_saved_session_command,
+    format_saved_session_help_lines,
+    format_saved_session_list_lines,
+    is_saved_session_command,
+    parse_saved_session_command,
+)
 from ..runtime.session_service import SessionService
-from ..runtime.sessions import ChatSession, SessionInfo, SessionStore
-
-
-SESSION_COMMANDS = {"/session", "session"}
-
-
-@dataclass(slots=True)
-class SessionCommandResult:
-    session: ChatSession
-    lines: list[str]
+from ..runtime.sessions import ChatSession, SessionStore
 
 
 def load_initial_session(
@@ -33,7 +31,7 @@ def load_initial_session(
 
 
 def is_session_command(prompt: str) -> bool:
-    return prompt.split(maxsplit=1)[0] in SESSION_COMMANDS
+    return is_saved_session_command(prompt)
 
 
 async def handle_session_command_async(
@@ -42,60 +40,14 @@ async def handle_session_command_async(
     session_service: SessionService,
     current_session: ChatSession,
 ) -> SessionCommandResult:
-    parts = prompt.split()
-    if len(parts) == 1 or parts[1] == "help":
-        return SessionCommandResult(
-            session=current_session,
-            lines=_session_help_lines(),
-        )
-
-    action = parts[1]
-
-    if action == "list":
-        sessions = await session_service.list_sessions()
-        return SessionCommandResult(
-            session=current_session,
-            lines=_format_session_list_lines(
-                sessions,
-                current_session_name=current_session.name,
-            ),
-        )
-
-    if action == "current":
-        return SessionCommandResult(
-            session=current_session,
-            lines=[
-                (
-                    f"Current session: {current_session.name} "
-                    f"({len(current_session.history)} messages)"
-                )
-            ],
-        )
-
-    if action == "new":
-        name = parts[2] if len(parts) >= 3 else None
-        next_session = await session_service.create_session(name)
-        return SessionCommandResult(
-            session=next_session,
-            lines=[f"Switched to new session: {next_session.name}"],
-        )
-
-    if action == "switch":
-        if len(parts) < 3:
-            raise ValueError("Usage: /session switch <name>")
-
-        next_session = await session_service.switch_session(parts[2])
-        return SessionCommandResult(
-            session=next_session,
-            lines=[
-                (
-                    f"Switched to session: {next_session.name} "
-                    f"({len(next_session.history)} messages)"
-                )
-            ],
-        )
-
-    raise ValueError("Unknown session command. Use /session help")
+    command = parse_saved_session_command(prompt)
+    if command is None:
+        raise ValueError("Unknown session command. Use /session help")
+    return await execute_saved_session_command(
+        session_service=session_service,
+        current_session=current_session,
+        command=command,
+    )
 
 
 def handle_session_command(
@@ -116,7 +68,7 @@ def handle_session_command(
 
 
 def print_session_help() -> None:
-    _print_lines(_session_help_lines())
+    _print_lines(format_saved_session_help_lines())
 
 
 def print_sessions(
@@ -125,7 +77,7 @@ def print_sessions(
     current_session_name: str,
 ) -> None:
     _print_lines(
-        _format_session_list_lines(
+        format_saved_session_list_lines(
             session_store.list_sessions(),
             current_session_name=current_session_name,
         )
@@ -145,35 +97,6 @@ def clear_history(session_store: SessionStore, session: ChatSession) -> None:
     session.history.clear()
     session.compressed_summary = ""
     save_session_state(session_store, session)
-
-
-def _session_help_lines() -> list[str]:
-    return [
-        "Session commands:",
-        "- /session list",
-        "- /session current",
-        "- /session new [name]",
-        "- /session switch <name>",
-    ]
-
-
-def _format_session_list_lines(
-    sessions: list[SessionInfo],
-    *,
-    current_session_name: str,
-) -> list[str]:
-    if not sessions:
-        return ["No saved sessions."]
-
-    lines = ["Saved sessions:"]
-    for session in sessions:
-        marker = "*" if session.name == current_session_name else " "
-        lines.append(
-            f"{marker} {session.name} | "
-            f"{session.message_count} messages | "
-            f"{session.updated_at}"
-        )
-    return lines
 
 
 def _print_lines(lines: list[str]) -> None:

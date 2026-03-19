@@ -10,9 +10,11 @@ from ..schemas import (
     TTSRequest,
     TTSVoiceModel,
     TTSVoicesResponse,
+    UpdateWebRuntimeConfigRequest,
     WebASRConfigModel,
     WebConfigResponse,
     WebLive2DConfigModel,
+    WebRuntimeConfigModel,
     WebStageConfigModel,
 )
 from ..services.web_console import Live2DUploadFile
@@ -40,8 +42,26 @@ async def get_web_config(
         session_name=current_session.name,
         role_name=role_name,
         route_mode=route_mode,
+        delegated_ack_enabled=runtime.context.coordinator.delegated_ack_enabled,
     )
     return WebConfigResponse(**payload)
+
+
+@router.patch("/web/runtime", response_model=WebRuntimeConfigModel)
+async def update_web_runtime_config(
+    request: UpdateWebRuntimeConfigRequest,
+    runtime=Depends(get_app_runtime),
+) -> WebRuntimeConfigModel:
+    if runtime.context is None:
+        raise HTTPException(status_code=503, detail="EchoBot runtime is not ready")
+
+    runtime.context.coordinator.set_delegated_ack_enabled(
+        request.delegated_ack_enabled,
+    )
+    payload = await runtime.web_console_service.save_runtime_settings(
+        delegated_ack_enabled=request.delegated_ack_enabled,
+    )
+    return WebRuntimeConfigModel(**payload)
 
 
 @router.get("/web/live2d/{asset_path:path}")

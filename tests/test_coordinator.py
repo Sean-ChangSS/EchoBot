@@ -88,6 +88,40 @@ class SlowAgentProvider(LLMProvider):
 
 
 class ConversationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
+    async def test_delegated_ack_can_be_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            coordinator, session_store = self._build_coordinator(
+                Path(temp_dir),
+                agent_provider=FakeRoleplayProvider(),
+                delegated_ack_enabled=False,
+            )
+
+            result = await coordinator.handle_user_turn(
+                "demo",
+                "Please set a cron reminder",
+            )
+
+            job = None
+            for _ in range(20):
+                job = await coordinator.get_job(result.job_id or "")
+                if job is not None and job.status != "running":
+                    break
+                await asyncio.sleep(0.01)
+
+            session = session_store.load_session("demo")
+            await coordinator.close()
+
+            assert job is not None
+            self.assertTrue(result.delegated)
+            self.assertFalse(result.completed)
+            self.assertEqual("", result.response_text)
+            self.assertEqual("", job.immediate_response)
+            self.assertEqual("completed", job.status)
+            self.assertEqual(
+                ["Please set a cron reminder", "done"],
+                [message.content for message in session.history],
+            )
+
     async def test_close_cancels_pending_job_without_runtime_warning(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             coordinator, session_store = self._build_coordinator(Path(temp_dir))
@@ -153,6 +187,9 @@ class ConversationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
     def _build_coordinator(
         self,
         workspace: Path,
+        *,
+        agent_provider: LLMProvider | None = None,
+        delegated_ack_enabled: bool = True,
     ) -> tuple[ConversationCoordinator, SessionStore]:
         session_store = SessionStore(workspace / "sessions")
         agent_session_store = SessionStore(workspace / "agent_sessions")
@@ -160,7 +197,7 @@ class ConversationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
         coordinator = ConversationCoordinator(
             session_store=session_store,
             agent_runner=SessionAgentRunner(
-                AgentCore(SlowAgentProvider()),
+                AgentCore(agent_provider or SlowAgentProvider()),
                 agent_session_store,
             ),
             decision_engine=DecisionEngine(),
@@ -169,6 +206,7 @@ class ConversationCoordinatorTests(unittest.IsolatedAsyncioTestCase):
                 role_registry,
             ),
             role_registry=role_registry,
+            delegated_ack_enabled=delegated_ack_enabled,
         )
         return coordinator, session_store
 

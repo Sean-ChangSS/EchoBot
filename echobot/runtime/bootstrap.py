@@ -20,6 +20,7 @@ from ..providers.openai_compatible import (
 )
 from ..runtime.session_runner import SessionAgentRunner
 from ..runtime.agent_traces import AgentTraceStore
+from ..runtime.settings import RuntimeSettingsStore
 from ..runtime.sessions import ChatSession, SessionStore
 from ..runtime.system_prompt import build_default_system_prompt
 from ..scheduling.cron import CronService
@@ -37,6 +38,7 @@ class RuntimeOptions:
     workspace: Path | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    delegated_ack_enabled: bool | None = None
     no_tools: bool = False
     no_skills: bool = False
     no_memory: bool = False
@@ -72,6 +74,8 @@ def build_runtime_context(
     load_session_state: bool,
 ) -> RuntimeContext:
     workspace = (options.workspace or Path(".")).resolve()
+    settings_store = RuntimeSettingsStore(_runtime_settings_path(workspace))
+    runtime_settings = settings_store.load()
     env_file_path = _resolve_runtime_path(workspace, options.env_file)
     load_env_file(str(env_file_path))
     configure_runtime_logging()
@@ -159,6 +163,10 @@ def build_runtime_context(
         decision_engine=decision_engine,
         roleplay_engine=roleplay_engine,
         role_registry=role_registry,
+        delegated_ack_enabled=_delegated_ack_enabled(
+            options,
+            runtime_settings=runtime_settings,
+        ),
     )
     heartbeat_service = None
     if not options.no_heartbeat and _heartbeat_enabled():
@@ -249,6 +257,18 @@ def _heartbeat_enabled() -> bool:
     return raw_value not in {"0", "false", "no", "off"}
 
 
+def _delegated_ack_enabled(
+    options: RuntimeOptions,
+    *,
+    runtime_settings,
+) -> bool:
+    if options.delegated_ack_enabled is not None:
+        return bool(options.delegated_ack_enabled)
+    if runtime_settings.delegated_ack_enabled is not None:
+        return bool(runtime_settings.delegated_ack_enabled)
+    return _env_bool("ECHOBOT_DELEGATED_ACK_ENABLED", True)
+
+
 def _env_int(name: str, default: int) -> int:
     raw_value = os.environ.get(name, "").strip()
     if not raw_value:
@@ -259,11 +279,26 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+
+    cleaned = raw_value.strip().lower()
+    if not cleaned:
+        return default
+    return cleaned not in {"0", "false", "no", "off"}
+
+
 def _resolve_runtime_path(workspace: Path, path: str | Path) -> Path:
     resolved_path = Path(path).expanduser()
     if resolved_path.is_absolute():
         return resolved_path
     return workspace / resolved_path
+
+
+def _runtime_settings_path(workspace: Path) -> Path:
+    return workspace / ".echobot" / "runtime_settings.json"
 
 
 def _build_provider_from_env(
