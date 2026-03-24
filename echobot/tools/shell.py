@@ -3,11 +3,56 @@ from __future__ import annotations
 import asyncio
 import locale
 import os
+import re
+import shlex
 from pathlib import Path
 from typing import Any
 
 from .base import ToolOutput
 from .filesystem import WorkspaceTool
+
+# Allowlist of safe command prefixes the LLM agent may execute.
+# Add entries here as needed. Everything else is blocked.
+ALLOWED_COMMANDS: set[str] = {
+    "ls", "cat", "head", "tail", "wc", "find", "grep", "echo",
+    "pwd", "date", "whoami", "env", "printenv",
+    "python", "python3", "pip", "pip3",
+    "node", "npm", "npx",
+    "git", "diff", "patch",
+    "curl", "wget",
+    "tar", "unzip", "gzip",
+    "mkdir", "cp", "mv", "touch",
+}
+
+# Patterns that indicate shell injection / chaining attempts.
+_DANGEROUS_PATTERNS: re.Pattern[str] = re.compile(
+    r"[;|&`$]|\b(sudo|su|rm|chmod|chown|kill|pkill|shutdown|reboot|mkfs|dd|nc|ncat"
+    r"|netcat|telnet|ssh|scp|sftp|wget\s+-O\s*/|curl\s+.*\|\s*sh|eval|exec)\b"
+)
+
+
+def _validate_command(command: str) -> None:
+    """Raise ValueError if *command* is not on the allowlist or looks dangerous."""
+    if _DANGEROUS_PATTERNS.search(command):
+        raise ValueError(
+            f"Command blocked: contains a disallowed operator or keyword. "
+            f"Only simple, single commands from the allowlist are permitted."
+        )
+
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        tokens = command.split()
+
+    if not tokens:
+        raise ValueError("Empty command")
+
+    base_cmd = Path(tokens[0]).name  # handle /usr/bin/python -> python
+    if base_cmd not in ALLOWED_COMMANDS:
+        raise ValueError(
+            f"Command '{base_cmd}' is not in the allowed command list. "
+            f"Allowed: {', '.join(sorted(ALLOWED_COMMANDS))}"
+        )
 
 
 class CommandExecutionTool(WorkspaceTool):
@@ -44,6 +89,8 @@ class CommandExecutionTool(WorkspaceTool):
         command = str(arguments.get("command", "")).strip()
         if not command:
             raise ValueError("command is required")
+
+        _validate_command(command)
 
         relative_workdir = str(arguments.get("workdir", ".")).strip() or "."
         timeout = _read_positive_float(arguments.get("timeout", 20), name="timeout")

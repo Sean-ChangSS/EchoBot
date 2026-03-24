@@ -6,12 +6,26 @@ from typing import Any
 
 from .base import BaseTool, ToolOutput
 
+# Sensitive filenames that must never be written to, even inside the workspace.
+_BLOCKED_WRITE_NAMES: set[str] = {
+    ".bashrc", ".bash_profile", ".zshrc", ".profile", ".login",
+    ".ssh", "authorized_keys", "id_rsa", "id_ed25519",
+    ".env", ".env.local", ".env.production",
+    ".gitconfig", ".netrc",
+}
+
+# Maximum file size the agent is allowed to write (1 MB).
+_MAX_WRITE_BYTES: int = 1 * 1024 * 1024
+
 
 class WorkspaceTool(BaseTool):
     def __init__(self, workspace: str | Path = ".") -> None:
         self.workspace = Path(workspace)
 
     def _resolve_workspace_path(self, relative_path: str) -> Path:
+        if Path(relative_path).is_absolute():
+            raise ValueError(f"Absolute paths are not allowed: {relative_path}")
+
         workspace_root = self.workspace.resolve()
         target = (workspace_root / relative_path).resolve()
 
@@ -161,6 +175,20 @@ class WriteTextFileTool(WorkspaceTool):
         overwrite: bool,
     ) -> dict[str, Any]:
         target = self._resolve_workspace_path(relative_path)
+
+        # Block writes to sensitive filenames anywhere in the path.
+        for part in target.parts:
+            if part in _BLOCKED_WRITE_NAMES:
+                raise ValueError(
+                    f"Writing to '{part}' is blocked for security reasons."
+                )
+
+        # Enforce maximum write size.
+        if len(content.encode("utf-8")) > _MAX_WRITE_BYTES:
+            raise ValueError(
+                f"Content exceeds maximum write size of {_MAX_WRITE_BYTES} bytes."
+            )
+
         file_existed = target.exists()
         if file_existed and not overwrite:
             raise ValueError(f"File already exists: {relative_path}")

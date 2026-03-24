@@ -1,14 +1,14 @@
 # Core
-fastapi
-uvicorn
-pydantic
-loguru
-PyYAML
-Pillow
+fastapi==0.135.2
+uvicorn==0.42.0
+pydantic==2.12.5
+loguru==0.7.3
+PyYAML==6.0.3
+Pillow==12.1.1
 
 # Memory
-agentscope
-reme-ai[light] @ git+https://github.com/agentscope-ai/ReMe.git
+agentscope==1.0.17
+reme-ai[light] @ git+https://github.com/agentscope-ai/ReMe.git@7b02c4521826c3f497f95d3077d676cd31b11a74
 
 # Document processing
 # defusedxml
@@ -19,9 +19,9 @@ reme-ai[light] @ git+https://github.com/agentscope-ai/ReMe.git
 # pypdf
 
 # ASR and TTS
-edge-tts
-sherpa-onnx
+edge-tts==7.2.8
+sherpa-onnx==1.12.33
 
 # Gateway
-qq-botpy
-python-telegram-bot
+qq-botpy==1.2.1
+python-telegram-bot==22.7
